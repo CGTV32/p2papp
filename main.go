@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 
 func main() {
 
-	var dataBytes []byte
+	var dataBytes []byte = fileToBytes("/home/cgtv32/Documents/p2ptest/test.txt")
 
 	var wg sync.WaitGroup
 
@@ -34,14 +35,13 @@ func main() {
 
 	fmt.Println("Connection initialised")
 
-	done := make(chan struct{})
-
 	wg.Add(3)
 
-	go listen(listener, &wg, done)
+	go listen(listener, &wg)
 	go writeToPeer(conn, &wg, dataBytes)
 
 	wg.Wait()
+
 }
 
 func writeToPeer(conn net.Conn, wg *sync.WaitGroup, message []byte) {
@@ -57,9 +57,22 @@ func writeToPeer(conn net.Conn, wg *sync.WaitGroup, message []byte) {
 	fmt.Println("Written bytes:", len(message))
 }
 
-func listen(listener net.Listener, wg *sync.WaitGroup, done chan struct{}) {
+func listen(listener net.Listener, wg *sync.WaitGroup) {
 	defer wg.Done()
-	defer close(done)
+
+	// discover a UPnP or NAT-PMP gateway on the local network
+	natMapper := nat.Any()
+
+	extPort, err := natMapper.AddMapping("TCP", 30303, 30303, "my-custom-p2p-app", 20*time.Minute)
+	if err != nil {
+		fmt.Printf("Failed to map port (is UPnP disabled on router?): %v\n", err)
+		return
+	}
+
+	fmt.Printf("Successfully opened port! External internet traffic on port %d will forward here.\n", extPort)
+
+	// clean up and close the port when done
+	defer natMapper.DeleteMapping("TCP", int(extPort), 30303)
 
 	conn, err := listener.Accept()
 	if err != nil {
@@ -79,22 +92,13 @@ func listen(listener net.Listener, wg *sync.WaitGroup, done chan struct{}) {
 	fmt.Println("Received bytes:", receivedData)
 }
 
-func handlePort(done chan struct{}, wg *sync.WaitGroup) {
-	defer wg.Done()
+func fileToBytes(filePath string) []byte {
 
-	// discover a UPnP or NAT-PMP gateway on the local network
-	natMapper := nat.Any()
-
-	extPort, err := natMapper.AddMapping("TCP", 30303, 30303, "my-custom-p2p-app", 20*time.Minute)
+	content, err := os.ReadFile(filePath)
 	if err != nil {
-		fmt.Printf("Failed to map port (is UPnP disabled on router?): %v\n", err)
-		return
+		log.Fatalf("Failed to read file: %s", err)
 	}
 
-	fmt.Printf("Successfully opened port! External internet traffic on port %d will forward here.\n", extPort)
+	return content
 
-	// Clean up and close the port when done
-	defer natMapper.DeleteMapping("TCP", int(extPort), 30303)
-
-	<-done
 }
