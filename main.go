@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"log"
@@ -19,7 +20,6 @@ func main() {
 	//var dataBytes []byte = fileToBytes("/home/cgtv32/Documents/p2ptest/test.txt") // hard coded for tests, points to self for testing
 	peerSocket := "127.0.0.1:30303"
 
-	wg.Add(1)
 	var writeMode string = os.Args[1]
 	var message []string = os.Args[2:]
 	var messageBytes []byte
@@ -29,11 +29,13 @@ func main() {
 		messageBytes = append(messageBytes, byte(' '))
 	}
 
-	if writeMode == "false" {
+	wg.Add(1)
+	switch writeMode {
+	case "false":
 		go listen(30303, &wg)
 		wg.Wait()
-	} else if writeMode == "true" {
-		go writeToPeerFromFile(peerSocket, &wg, messageBytes)
+	case "true":
+		go writeToPeerFromCLI(peerSocket, &wg)
 		wg.Wait()
 	}
 
@@ -62,17 +64,33 @@ func writeToPeerFromFile(peerSocket string, wg *sync.WaitGroup, message []byte) 
 func writeToPeerFromCLI(peerSocket string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	conn, err := net.DialTimeout("tcp", peerSocket, 10*time.Second) // init a connection
-	if err != nil {
-		log.Fatal("Error connecting to peer:\n", err)
-	}
-	defer conn.Close() // make sure it closes gracefully
-
-	fmt.Println("Connection initialised")
-
+	scanner := bufio.NewScanner(os.Stdin)
+	var conn net.Conn
+	var err error
 	for {
+		errorCheck := true
+		for errorCheck {
+			conn, err = net.DialTimeout("tcp", peerSocket, 10*time.Second) // init a connection
+			if err != nil {
+				fmt.Println("Error connecting to peer, retrying in 10 seconds.")
+				time.Sleep(time.Second * 10)
+			} else {
+				errorCheck = false
+			}
+		}
+
+		fmt.Println("Enter text:\n")
+		scanner.Scan()
+		input := scanner.Text() // removes trailing whitetext etc.
+		_, err := conn.Write([]byte(input))
+
+		if err != nil {
+			fmt.Println("Error writing to IP", err)
+		}
+		conn.Close()
 
 	}
+
 }
 
 func listen(port int, wg *sync.WaitGroup) {
